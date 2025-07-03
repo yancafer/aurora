@@ -34,18 +34,24 @@ export default function DumpControl({ user }: DumpControlProps) {
     const executeDump = async (type: 'daily' | 'manual' | 'quick' | 'league') => {
         setLoading(true)
         try {
+            const body: any = {
+                type,
+                date: selectedDate,
+                ...dumpOptions,
+            };
+            // Se nenhuma liga estiver selecionada, envie array vazio (dump global)
+            if (selectedLeagues.length > 0) {
+                body.leagues = selectedLeagues;
+            } else {
+                body.leagues = [];
+            }
             const response = await fetch('/api/dump', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${process.env.NEXT_PUBLIC_DUMP_API_KEY}`,
                 },
-                body: JSON.stringify({
-                    type,
-                    date: selectedDate,
-                    leagues: selectedLeagues,
-                    ...dumpOptions,
-                }),
+                body: JSON.stringify(body),
             })
 
             const result = await response.json()
@@ -185,8 +191,9 @@ export default function DumpControl({ user }: DumpControlProps) {
                             <strong>Ligas selecionadas:</strong> {selectedLeagues.length}
                         </div>
                         <div className="text-sm text-blue-600 mt-1">
-                            {selectedLeagues.length === 0 ? 'Nenhuma liga selecionada' :
-                                `${leagues.filter(l => selectedLeagues.includes(l.id)).map(l => l.name).join(', ')}`}
+                            {selectedLeagues.length === 0
+                                ? 'Nenhuma liga selecionada (dump global: todas as ligas)'
+                                : `${leagues.filter(l => selectedLeagues.includes(l.id)).map(l => l.name).join(', ')}`}
                         </div>
                     </div>
                 </div>
@@ -273,8 +280,8 @@ export default function DumpControl({ user }: DumpControlProps) {
             {/* Resultado do Último Dump */}
             {lastDumpResult && (
                 <div className={`p-4 rounded-lg border-l-4 ${lastDumpResult.success
-                        ? 'bg-green-50 border-green-400'
-                        : 'bg-red-50 border-red-400'
+                    ? 'bg-green-50 border-green-400'
+                    : 'bg-red-50 border-red-400'
                     }`}>
                     <div className="flex items-center justify-between">
                         <div>

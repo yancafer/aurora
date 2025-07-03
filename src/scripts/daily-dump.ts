@@ -60,23 +60,33 @@ class DailyDumpService {
 
     const {
       date = new Date().toISOString().split("T")[0],
-      leagues = this.DEFAULT_LEAGUES,
+      leagues,
       forceUpdate = false,
       includeOdds = true,
       includeStats = true,
       includeStandings = true,
     } = options;
 
+    let leagueIds: number[];
+    if (!leagues || leagues.length === 0) {
+      console.log("🌍 Buscando todas as ligas disponíveis...");
+      const allLeagues = await ApiFootballService.getLeagues();
+      leagueIds = allLeagues.map((l: any) => l.league.id);
+      console.log(`🏆 Total de ligas encontradas: ${leagueIds.length}`);
+    } else {
+      leagueIds = leagues;
+    }
+
     console.log("🚀 Iniciando dump diário...");
     console.log(`📅 Data: ${date}`);
-    console.log(`🏆 Ligas: ${leagues.join(", ")}`);
+    console.log(`🏆 Ligas: ${leagueIds.join(", ")}`);
 
     try {
       // 1. Buscar partidas do dia
       console.log("📅 Buscando partidas...");
       const allFixtures = [];
 
-      for (const leagueId of leagues) {
+      for (const leagueId of leagueIds) {
         try {
           const fixtures = await ApiFootballService.getFixtures(date, leagueId);
           allFixtures.push(...fixtures);
