@@ -1,14 +1,18 @@
 import axios from "axios";
 import { Fixture, Odd, TeamStatistics, Standing } from "@/types";
 
+// Log para depuração da variável de ambiente
+console.log("RAPID_API_KEY:", process.env.RAPID_API_KEY);
+
 const API_FOOTBALL_BASE_URL = "https://v3.football.api-sports.io";
-// Corrigido: usar API_FOOTBALL_KEY do .env
-const API_KEY = process.env.API_FOOTBALL_KEY;
+// Corrigido: usar RAPID_API_KEY do .env
+const API_KEY = process.env.RAPID_API_KEY;
 
 const apiClient = axios.create({
   baseURL: API_FOOTBALL_BASE_URL,
   headers: {
-    "x-apisports-key": API_KEY,
+    "X-RapidAPI-Key": API_KEY,
+    "X-RapidAPI-Host": "v3.football.api-sports.io",
   },
 });
 

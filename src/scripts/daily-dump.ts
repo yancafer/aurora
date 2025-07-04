@@ -34,235 +34,7 @@ class DailyDumpService {
     3, // UEFA Europa League
   ];
 
-  static async runDailyDump(options: DumpOptions = {}): Promise<void> {
-    // Verificar se as variáveis de ambiente estão carregadas
-    console.log("🔍 Verificando configuração...");
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-    if (!serviceRoleKey) {
-      console.error("❌ SUPABASE_SERVICE_ROLE_KEY não encontrada!");
-      throw new Error("Service role key não configurada");
-    }
-
-    if (!supabaseUrl) {
-      console.error("❌ NEXT_PUBLIC_SUPABASE_URL não encontrada!");
-      throw new Error("Supabase URL não configurada");
-    }
-
-    console.log(
-      `✅ Service Role Key: ${serviceRoleKey.slice(
-        0,
-        6
-      )}...${serviceRoleKey.slice(-6)}`
-    );
-    console.log(`✅ Supabase URL: ${supabaseUrl}`);
-
-    const {
-      date = new Date().toISOString().split("T")[0],
-      leagues,
-      forceUpdate = false,
-      includeOdds = true,
-      includeStats = true,
-      includeStandings = true,
-    } = options;
-
-    let leagueIds: number[];
-    if (!leagues || leagues.length === 0) {
-      console.log("🌍 Buscando todas as ligas disponíveis...");
-      const allLeagues = await ApiFootballService.getLeagues();
-      leagueIds = allLeagues.map((l: any) => l.league.id);
-      console.log(`🏆 Total de ligas encontradas: ${leagueIds.length}`);
-    } else {
-      leagueIds = leagues;
-    }
-
-    console.log("🚀 Iniciando dump diário...");
-    console.log(`📅 Data: ${date}`);
-    console.log(`🏆 Ligas: ${leagueIds.join(", ")}`);
-
-    try {
-      // 1. Buscar partidas do dia
-      console.log("📅 Buscando partidas...");
-      const allFixtures = [];
-
-      for (const leagueId of leagueIds) {
-        try {
-          const fixtures = await ApiFootballService.getFixtures(date, leagueId);
-          allFixtures.push(...fixtures);
-          console.log(
-            `✅ Liga ${leagueId}: ${fixtures.length} partidas encontradas`
-          );
-
-          // Delay para respeitar o limite de requisições
-          await this.delay(1000);
-        } catch (error) {
-          console.error(
-            `❌ Erro ao buscar partidas da liga ${leagueId}:`,
-            error
-          );
-        }
-      }
-
-      console.log(`📊 Total de partidas encontradas: ${allFixtures.length}`);
-
-      // 2. Salvar partidas no Supabase
-      console.log("💾 Salvando partidas no banco de dados...");
-      for (const fixture of allFixtures) {
-        await this.saveFixture(fixture, forceUpdate);
-      }
-
-      // 3. Buscar e salvar odds (se habilitado)
-      if (includeOdds && allFixtures.length > 0) {
-        console.log("🎯 Buscando odds...");
-        for (const fixture of allFixtures) {
-          try {
-            const odds = await ApiFootballService.getAllOddsForFixture(
-              fixture.id
-            );
-            await this.saveOdds(fixture.id, odds, forceUpdate);
-            console.log(`✅ Odds salvas para a partida ${fixture.id}`);
-
-            // Delay para respeitar o limite de requisições
-            await this.delay(2000);
-          } catch (error) {
-            console.error(
-              `❌ Erro ao buscar odds da partida ${fixture.id}:`,
-              error
-            );
-          }
-        }
-      }
-
-      // 4. Buscar e salvar estatísticas dos times (se habilitado)
-      if (includeStats && allFixtures.length > 0) {
-        console.log("📈 Buscando estatísticas dos times...");
-        const uniqueTeams = this.getUniqueTeams(allFixtures);
-        const currentSeason = new Date().getFullYear();
-
-        for (const team of uniqueTeams) {
-          try {
-            const stats = await ApiFootballService.getTeamStatistics(
-              team.id,
-              currentSeason,
-              team.leagueId
-            );
-            await this.saveTeamStatistics(
-              team.id,
-              team.leagueId,
-              stats,
-              forceUpdate
-            );
-            console.log(`✅ Estatísticas salvas para o time ${team.name}`);
-
-            await this.delay(1500);
-          } catch (error) {
-            console.error(
-              `❌ Erro ao buscar estatísticas do time ${team.name}:`,
-              error
-            );
-          }
-        }
-      }
-
-      // 5. Buscar e salvar classificações (se habilitado)
-      if (includeStandings) {
-        console.log("🏆 Buscando classificações...");
-        const uniqueLeagues = Array.from(
-          new Set(allFixtures.map((f) => f.league.id))
-        );
-        const currentSeason = new Date().getFullYear();
-
-        for (const leagueId of uniqueLeagues) {
-          try {
-            const standings = await ApiFootballService.getStandings(
-              leagueId,
-              currentSeason
-            );
-            await this.saveStandings(leagueId, standings, forceUpdate);
-            console.log(`✅ Classificação salva para a liga ${leagueId}`);
-
-            await this.delay(1500);
-          } catch (error) {
-            console.error(
-              `❌ Erro ao buscar classificação da liga ${leagueId}:`,
-              error
-            );
-          }
-        }
-      }
-
-      // 6. Gerar relatório final
-      const summary = await this.generateDumpSummary(date);
-      console.log("📋 Resumo do dump:");
-      console.log(`   - Partidas: ${summary.fixtures}`);
-      console.log(`   - Odds: ${summary.odds}`);
-      console.log(`   - Times com estatísticas: ${summary.teamStats}`);
-      console.log(`   - Classificações: ${summary.standings}`);
-
-      console.log("✅ Dump diário concluído com sucesso!");
-    } catch (error) {
-      console.error("❌ Erro no dump diário:", error);
-      throw error;
-    }
-  }
-
-  private static async saveFixture(fixture: any, forceUpdate: boolean = false) {
-    try {
-      console.log(`💾 Tentando salvar partida ${fixture.id}...`);
-
-      const existingData = !forceUpdate
-        ? await supabaseAdmin
-            .from("fixtures")
-            .select("id")
-            .eq("api_fixture_id", fixture.id)
-            .single()
-        : null;
-
-      if (existingData?.data && !forceUpdate) {
-        console.log(`⏭️ Partida ${fixture.id} já existe no banco de dados`);
-        return;
-      }
-
-      const fixtureData = {
-        api_fixture_id: fixture.id,
-        date: fixture.fixture.date.split("T")[0],
-        timestamp: fixture.fixture.timestamp,
-        status: fixture.fixture.status,
-        venue: fixture.fixture.venue,
-        teams: fixture.teams,
-        goals: fixture.goals,
-        score: fixture.score,
-        league: fixture.league,
-        updated_at: new Date().toISOString(),
-      };
-
-      console.log(
-        `📝 Dados da partida a serem salvos:`,
-        JSON.stringify(fixtureData, null, 2)
-      );
-
-      const { data, error } = await supabaseAdmin
-        .from("fixtures")
-        .upsert(fixtureData, {
-          onConflict: "api_fixture_id",
-        });
-
-      if (error) {
-        console.error(
-          `❌ Erro específico ao salvar partida ${fixture.id}:`,
-          error
-        );
-        throw error;
-      } else {
-        console.log(`✅ Partida ${fixture.id} salva com sucesso!`, data);
-      }
-    } catch (error) {
-      console.error(`❌ Erro geral ao salvar partida ${fixture.id}:`, error);
-      throw error; // Re-throw para parar a execução e ver o erro
-    }
-  }
-
+  // Métodos auxiliares devem ser static e estar antes de runDailyDump
   private static async saveOdds(
     fixtureId: number,
     odds: any[],
@@ -303,6 +75,10 @@ class DailyDumpService {
     } catch (error) {
       console.error("Erro ao salvar odds:", error);
     }
+  }
+
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private static getUniqueTeams(
@@ -402,124 +178,234 @@ class DailyDumpService {
     }
   }
 
-  private static delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+  static async runDailyDump(options: DumpOptions = {}): Promise<void> {
+    // Verificar se as variáveis de ambiente estão carregadas
+    console.log("🔍 Verificando configuração...");
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+    if (!serviceRoleKey) {
+      console.error("❌ SUPABASE_SERVICE_ROLE_KEY não encontrada!");
+      throw new Error("Service role key não configurada");
+    }
+
+    if (!supabaseUrl) {
+      console.error("❌ NEXT_PUBLIC_SUPABASE_URL não encontrada!");
+      throw new Error("Supabase URL não configurada");
+    }
+
+    console.log(
+      `✅ Service Role Key: ${serviceRoleKey.slice(
+        0,
+        6
+      )}...${serviceRoleKey.slice(-6)}`
+    );
+    console.log(`✅ Supabase URL: ${supabaseUrl}`);
+
+    const {
+      date = new Date().toISOString().split("T")[0],
+      leagues,
+      forceUpdate = false,
+      includeOdds = true,
+      includeStats = true,
+      includeStandings = true,
+    } = options;
+
+    let leagueIds: number[];
+    if (!leagues || leagues.length === 0) {
+      console.log("🌍 Buscando todas as ligas disponíveis...");
+      const allLeagues = await ApiFootballService.getLeagues();
+      leagueIds = allLeagues.map((l: any) => l.league.id);
+      console.log(`🏆 Total de ligas encontradas: ${leagueIds.length}`);
+    } else {
+      leagueIds = leagues;
+    }
+
+    console.log("🚀 Iniciando dump diário...");
+    console.log(`📅 Data: ${date}`);
+    // Nova abordagem: buscar todos os jogos do dia em uma única requisição
+    let allFixtures: any[] = [];
+    try {
+      console.log("📅 Buscando partidas do dia (todas as ligas)...");
+      allFixtures = await ApiFootballService.getFixtures(date);
+      console.log(`📊 Total de partidas encontradas: ${allFixtures.length}`);
+    } catch (error) {
+      console.error("❌ Erro ao buscar partidas do dia:", error);
+    }
+
+    // 2. Salvar partidas no Supabase
+    console.log("💾 Salvando partidas no banco de dados...");
+    for (const fixture of allFixtures) {
+      await DailyDumpService.saveFixture(fixture, forceUpdate);
+    }
+
+    // 3. Buscar e salvar odds (se habilitado)
+    if (includeOdds && allFixtures.length > 0) {
+      console.log("🎯 Buscando odds...");
+      for (const fixture of allFixtures) {
+        try {
+          const odds = await ApiFootballService.getAllOddsForFixture(fixture.fixture?.id || fixture.id);
+          await DailyDumpService.saveOdds(fixture.fixture?.id || fixture.id, odds, forceUpdate);
+          console.log(`✅ Odds salvas para a partida ${fixture.fixture?.id || fixture.id}`);
+
+          // Delay para respeitar o limite de requisições
+          await DailyDumpService.delay(2000);
+        } catch (error) {
+          console.error(
+            `❌ Erro ao buscar odds da partida ${fixture.fixture?.id || fixture.id}:`,
+            error
+          );
+        }
+      }
+    }
+
+    // 4. Buscar e salvar estatísticas dos times (se habilitado)
+    if (includeStats && allFixtures.length > 0) {
+      console.log("📈 Buscando estatísticas dos times...");
+      const uniqueTeams = DailyDumpService.getUniqueTeams(allFixtures);
+      const currentSeason = new Date().getFullYear();
+
+      for (const team of uniqueTeams) {
+        try {
+          const stats = await ApiFootballService.getTeamStatistics(
+            team.id,
+            currentSeason,
+            team.leagueId
+          );
+          await DailyDumpService.saveTeamStatistics(
+            team.id,
+            team.leagueId,
+            stats,
+            forceUpdate
+          );
+          console.log(`✅ Estatísticas salvas para o time ${team.name}`);
+
+          await DailyDumpService.delay(1500);
+        } catch (error) {
+          console.error(
+            `❌ Erro ao buscar estatísticas do time ${team.name}:`,
+            error
+          );
+        }
+      }
+    }
+
+    // 5. Buscar e salvar classificações (se habilitado)
+    if (includeStandings) {
+      console.log("🏆 Buscando classificações...");
+      const uniqueLeagues = Array.from(
+        new Set(allFixtures.map((f) => f.league.id))
+      );
+      const currentSeason = new Date().getFullYear();
+
+      for (const leagueId of uniqueLeagues) {
+        try {
+          const standings = await ApiFootballService.getStandings(
+            leagueId,
+            currentSeason
+          );
+          await DailyDumpService.saveStandings(leagueId, standings, forceUpdate);
+          console.log(`✅ Classificação salva para a liga ${leagueId}`);
+
+          await DailyDumpService.delay(1500);
+        } catch (error) {
+          console.error(
+            `❌ Erro ao buscar classificação da liga ${leagueId}:`,
+            error
+          );
+        }
+      }
+    }
+
+    // 6. Gerar relatório final
+    const summary = await DailyDumpService.generateDumpSummary(date);
+    console.log("📋 Resumo do dump:");
+    console.log(`   - Partidas: ${summary.fixtures}`);
+    console.log(`   - Odds: ${summary.odds}`);
+    console.log(`   - Times com estatísticas: ${summary.teamStats}`);
+    console.log(`   - Classificações: ${summary.standings}`);
+
+    console.log("✅ Dump diário concluído com sucesso!");
   }
 
-  /**
-   * Execução manual com opções personalizadas
-   */
-  static async runManualDump(options: DumpOptions = {}): Promise<void> {
-    console.log("🔧 Executando dump manual...");
-    return this.runDailyDump({ ...options, forceUpdate: true });
-  }
+  private static async saveFixture(fixture: any, forceUpdate: boolean = false) {
+    try {
+      // Logar o objeto fixture completo para depuração
+      console.log("[DEBUG] fixture recebido:", JSON.stringify(fixture, null, 2));
 
-  /**
-   * Dump rápido apenas com partidas e odds do dia
-   */
-  static async runQuickDump(date?: string): Promise<void> {
-    console.log("⚡ Executando dump rápido...");
-    return this.runDailyDump({
-      date,
-      includeStats: false,
-      includeStandings: false,
-      forceUpdate: false,
-    });
-  }
+      // Corrigir acesso ao id do fixture
+      const apiFixtureId = fixture.fixture?.id || fixture.id;
+      if (!apiFixtureId) {
+        console.error("[ERRO] fixture sem id detectado!", fixture);
+        throw new Error("Fixture sem id válido");
+      }
 
-  /**
-   * Dump completo para uma liga específica
-   */
-  static async runLeagueDump(
-    leagueId: number,
-    options: Partial<DumpOptions> = {}
-  ): Promise<void> {
-    console.log(`🏆 Executando dump da liga ${leagueId}...`);
-    return this.runDailyDump({
-      ...options,
-      leagues: [leagueId],
-      forceUpdate: true,
-    });
-  }
-}
+      console.log(`💾 Tentando salvar partida ${apiFixtureId}...`);
 
-// Função para executar dump baseado em argumentos da linha de comando
-function parseArguments(): DumpOptions {
-  const args = process.argv.slice(2);
-  const options: DumpOptions = {};
+      const existingData = !forceUpdate
+        ? await supabaseAdmin
+            .from("fixtures")
+            .select("id")
+            .eq("api_fixture_id", apiFixtureId)
+            .single()
+        : null;
 
-  for (let i = 0; i < args.length; i++) {
-    switch (args[i]) {
-      case "--date":
-        options.date = args[++i];
-        break;
-      case "--league":
-        const leagues = args[++i].split(",").map(Number);
-        options.leagues = leagues;
-        break;
-      case "--force":
-        options.forceUpdate = true;
-        break;
-      case "--no-odds":
-        options.includeOdds = false;
-        break;
-      case "--no-stats":
-        options.includeStats = false;
-        break;
-      case "--no-standings":
-        options.includeStandings = false;
-        break;
+      if (existingData?.data && !forceUpdate) {
+        console.log(`⏭️ Partida ${apiFixtureId} já existe no banco de dados`);
+        return;
+      }
+
+      const fixtureData = {
+        api_fixture_id: apiFixtureId,
+        date: fixture.fixture?.date?.split("T")[0] || fixture.date?.split("T")[0],
+        timestamp: fixture.fixture?.timestamp || fixture.timestamp,
+        status: fixture.fixture?.status || fixture.status,
+        venue: fixture.fixture?.venue || fixture.venue,
+        teams: fixture.teams,
+        goals: fixture.goals,
+        score: fixture.score,
+        league: fixture.league,
+        updated_at: new Date().toISOString(),
+      };
+
+      console.log(
+        `📝 Dados da partida a serem salvos:`,
+        JSON.stringify(fixtureData, null, 2)
+      );
+
+      const { data, error } = await supabaseAdmin
+        .from("fixtures")
+        .upsert(fixtureData, {
+          onConflict: "api_fixture_id",
+        });
+
+      if (error) throw error;
+
+      // Salvar odds junto, se existirem no objeto fixture
+      if (fixture.odds) {
+        await DailyDumpService.saveOdds(apiFixtureId, fixture.odds, forceUpdate);
+        console.log(`✅ Odds salvas junto com a partida ${apiFixtureId}`);
+      }
+
+      console.log(`✅ Partida ${apiFixtureId} salva com sucesso!`);
+    } catch (error) {
+      console.error(`❌ Erro ao salvar partida ${fixture.fixture?.id || fixture.id}:`, error);
     }
   }
-
-  return options;
 }
 
-// Execução manual
-if (require.main === module) {
-  const command = process.argv[2];
-  const options = parseArguments();
+// Executar o dump diário imediatamente ao iniciar o serviço
+(async () => {
+  const dumpOptions: DumpOptions = {
+    date: new Date().toISOString().split("T")[0],
+    leagues: [], // Deixe vazio para buscar todas as ligas
+    forceUpdate: false, // Defina como true para forçar atualização
+    includeOdds: true,
+    includeStats: true,
+    includeStandings: true,
+  };
 
-  let promise: Promise<void>;
+  await DailyDumpService.runDailyDump(dumpOptions);
+})();
 
-  switch (command) {
-    case "manual":
-      promise = DailyDumpService.runManualDump(options);
-      break;
-    case "quick":
-      promise = DailyDumpService.runQuickDump(options.date);
-      break;
-    case "league":
-      const leagueId = parseInt(process.argv[3]);
-      if (!leagueId) {
-        console.error("❌ O ID da liga é obrigatório para o comando 'league'");
-        process.exit(1);
-      }
-      promise = DailyDumpService.runLeagueDump(leagueId, options);
-      break;
-    default:
-      promise = DailyDumpService.runDailyDump(options);
-  }
-
-  promise
-    .then(() => {
-      console.log("✅ Dump executado com sucesso!");
-      process.exit(0);
-    })
-    .catch((error) => {
-      console.error("❌ Erro na execução:", error);
-      process.exit(1);
-    });
-}
-
-// Agendamento automático (descomente para produção)
-/*
-cron.schedule('0 4 * * *', () => {
-  console.log('🕐 Executando dump diário agendado...')
-  DailyDumpService.runDailyDump()
-}, {
-  timezone: 'America/Sao_Paulo'
-})
-*/
-
-export { DailyDumpService };
+export default DailyDumpService;
