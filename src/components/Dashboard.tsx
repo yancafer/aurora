@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react'
 import { User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import { Calendar, BarChart3, Trophy, Target, Database } from 'lucide-react'
-import { Fixture } from '@/types'
 import FixturesList from '@/components/FixturesList'
 import AnalysesHistory from '@/components/AnalysesHistory'
 import BettingHistory from '@/components/BettingHistory'
+import BettingSystemTest from '@/components/BettingSystemTest'
 import BettingAnalysis from '@/components/BettingAnalysis'
 import DumpControl from '@/components/DumpControl'
 import SupabaseTestButton from './SupabaseTestButton'
@@ -16,11 +16,11 @@ interface DashboardProps {
     user: User
 }
 
-type ActiveTab = 'fixtures' | 'analyses' | 'bets' | 'stats' | 'dump'
+type ActiveTab = 'fixtures' | 'analyses' | 'bets' | 'dump'
 
 export default function Dashboard({ user }: DashboardProps) {
-    const [activeTab, setActiveTab] = useState<ActiveTab>('fixtures')
-    const [selectedFixture, setSelectedFixture] = useState<Fixture | null>(null)
+    const [activeTab, setActiveTab] = useState<ActiveTab>('analyses')
+    const [selectedFixture, setSelectedFixture] = useState<any>(null)
     const [stats, setStats] = useState({
         totalAnalyses: 0,
         totalBets: 0,
@@ -41,7 +41,7 @@ export default function Dashboard({ user }: DashboardProps) {
                     .select('*')
                     .eq('user_id', user.id),
                 supabase
-                    .from('bets')
+                    .from('bet_history')
                     .select('*')
                     .eq('user_id', user.id)
             ])
@@ -49,16 +49,16 @@ export default function Dashboard({ user }: DashboardProps) {
             const analyses = analysesResponse.data || []
             const bets = betsResponse.data || []
 
-            const settledBets = bets.filter(bet => bet.result !== 'pending')
-            const wonBets = settledBets.filter(bet => bet.result === 'win')
-            const totalProfit = settledBets.reduce((sum, bet) => sum + (bet.profit_loss || 0), 0)
-            const winRate = settledBets.length > 0 ? (wonBets.length / settledBets.length) * 100 : 0
+            const settledBets = bets.filter(bet => bet.status === 'settled')
+            const wonBets = settledBets.filter(bet => bet.actual_result === 'win')
+            const totalStaked = settledBets.reduce((sum, bet) => sum + bet.bet_amount, 0)
+            const totalReturns = wonBets.reduce((sum, bet) => sum + (bet.potential_return || 0), 0)
 
             setStats({
                 totalAnalyses: analyses.length,
                 totalBets: bets.length,
-                totalProfit,
-                winRate
+                totalProfit: totalReturns - totalStaked,
+                winRate: settledBets.length > 0 ? (wonBets.length / settledBets.length) * 100 : 0
             })
         } catch (error) {
             console.error('Erro ao carregar estatísticas:', error)
@@ -66,9 +66,9 @@ export default function Dashboard({ user }: DashboardProps) {
     }
 
     const tabs = [
-        { id: 'fixtures' as ActiveTab, label: 'Partidas', icon: Calendar },
         { id: 'analyses' as ActiveTab, label: 'Análises', icon: BarChart3 },
-        { id: 'bets' as ActiveTab, label: 'Apostas', icon: Target },
+        { id: 'bets' as ActiveTab, label: 'Minhas Apostas', icon: Target },
+        { id: 'fixtures' as ActiveTab, label: 'Partidas', icon: Calendar },
         { id: 'dump' as ActiveTab, label: 'Dados', icon: Database },
     ]
 
@@ -125,7 +125,7 @@ export default function Dashboard({ user }: DashboardProps) {
                     </div>
                 </div>
             </div>
-            <SupabaseTestButton/>
+            <SupabaseTestButton />
 
             {/* Navigation Tabs */}
             <div className="bg-white rounded-lg shadow-sm border mb-8">
@@ -170,7 +170,12 @@ export default function Dashboard({ user }: DashboardProps) {
                     )}
                     {activeTab === 'analyses' && <AnalysesHistory user={user} onStatsUpdate={loadStats} />}
                     {activeTab === 'bets' && <BettingHistory user={user} onStatsUpdate={loadStats} />}
-                    {activeTab === 'dump' && <DumpControl user={user} />}
+                    {activeTab === 'dump' && (
+                        <div className="space-y-6">
+                            <DumpControl user={user} />
+                            <BettingSystemTest />
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

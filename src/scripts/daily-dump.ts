@@ -1,7 +1,7 @@
 import "dotenv/config";
 import cron from "node-cron";
 import { ApiFootballService } from "../services/api-football";
-import { supabaseAdmin } from "../lib/supabase";
+import { supabase } from "../lib/supabase";
 import { main as generateAnalyses } from "./generate-analyses";
 
 /**
@@ -61,20 +61,18 @@ class DailyDumpService {
     forceUpdate: boolean = false
   ) {
     try {
-      const { data, error } = await supabaseAdmin
-        .from("team_statistics")
-        .upsert(
-          {
-            team_id: teamId,
-            league_id: leagueId,
-            season: new Date().getFullYear(),
-            statistics: stats,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "team_id,league_id,season",
-          }
-        );
+      const { data, error } = await supabase.from("team_statistics").upsert(
+        {
+          team_id: teamId,
+          league_id: leagueId,
+          season: new Date().getFullYear(),
+          statistics: stats,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "team_id,league_id,season",
+        }
+      );
       if (error) throw error;
     } catch (error) {
       console.error("Erro ao salvar estatísticas do time:", error);
@@ -190,7 +188,7 @@ class DailyDumpService {
       }
       console.log(`💾 Tentando salvar partida ${apiFixtureId}...`);
       const existingData = !forceUpdate
-        ? await supabaseAdmin
+        ? await supabase
             .from("fixtures")
             .select("id")
             .eq("api_fixture_id", apiFixtureId)
@@ -217,7 +215,7 @@ class DailyDumpService {
         `📝 Dados da partida a serem salvos:`,
         JSON.stringify(fixtureData, null, 2)
       );
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabase
         .from("fixtures")
         .upsert(fixtureData, {
           onConflict: "api_fixture_id",

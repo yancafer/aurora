@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "../lib/supabase";
+import { supabase } from "../lib/supabase";
 import { Analysis } from "../types";
 import {
   calcProb1X2,
@@ -49,7 +49,7 @@ function isValidUUID(uuid: string) {
 
 async function getUserIdByEmail(email: string): Promise<string | null> {
   // Busca segura em auth.users via SQL RPC
-  const { data, error } = await supabaseAdmin.rpc("get_user_id_by_email", {
+  const { data, error } = await supabase.rpc("get_user_id_by_email", {
     user_email: email,
   });
   if (error || !data || !data[0] || !data[0].id) {
@@ -72,7 +72,7 @@ export async function main(date: string, user_id_or_email: string) {
     }
   }
   // Buscar partidas do dia
-  const { data: fixtures, error: fixturesError } = await supabaseAdmin
+  const { data: fixtures, error: fixturesError } = await supabase
     .from("fixtures")
     .select("*, teams, league")
     .eq("date", date);
@@ -81,7 +81,7 @@ export async function main(date: string, user_id_or_email: string) {
     return;
   }
   // Buscar estatísticas dos times
-  const { data: stats, error: statsError } = await supabaseAdmin
+  const { data: stats, error: statsError } = await supabase
     .from("team_statistics")
     .select("*")
     .eq("season", new Date().getFullYear());
@@ -375,7 +375,7 @@ export async function main(date: string, user_id_or_email: string) {
     };
 
     // Inserir todas as análises no Supabase
-    const { error } = await supabaseAdmin
+    const { error } = await supabase
       .from("analyses")
       .insert([analysisHome, analysisAway, analysisOver25, analysisBTTS]);
     if (error) {
